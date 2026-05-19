@@ -366,6 +366,39 @@ NEW_PRICING = r'''function Pricing({ onStarted }) {
         })
       ),
 
+      // ── Overage risk strip (low prominence, below plan cards)
+      (() => {
+        if (creditsEst === 0 || isOverAll) return null;
+        const recIdx   = plans.findIndex(p => p.id === recommended.id);
+        if (recIdx === 0) return null; // already on cheapest plan — no near-miss
+        const nearMiss = plans[recIdx - 1];
+        const overRate = parseFloat(nearMiss.overage.replace("$",""));
+        const overCr   = creditsEst - nearMiss.credits;
+        const overCost = Math.round(overCr * overRate);
+        const nmTotal  = Math.round((annual ? nearMiss.monthly * 0.8 : nearMiss.monthly) + overCost);
+        const recPrice = Math.round(annual ? recommended.monthly * 0.8 : recommended.monthly);
+        const saving   = nmTotal - recPrice;
+
+        return React.createElement("div", {
+          style: { margin: "20px 0 0", padding: "14px 20px", borderRadius: 12, background: "#FFFBEB", border: "1px solid #FDE68A", display: "flex", alignItems: "flex-start", gap: 10 }
+        },
+          // Info icon
+          React.createElement("svg", { width: 15, height: 15, viewBox: "0 0 16 16", fill: "none", style: { flexShrink: 0, marginTop: 1 } },
+            React.createElement("circle", { cx: 8, cy: 8, r: 7, stroke: "#D97706", strokeWidth: 1.4 }),
+            React.createElement("path", { d: "M8 7v4", stroke: "#D97706", strokeWidth: 1.5, strokeLinecap: "round" }),
+            React.createElement("circle", { cx: 8, cy: 5.2, r: 0.8, fill: "#D97706" })
+          ),
+          React.createElement("p", { style: { margin: 0, fontSize: 12, color: "#92400E", lineHeight: 1.6 } },
+            React.createElement("strong", { style: { fontWeight: 700 } }, nearMiss.id, " overage check: "),
+            "at ", creditsEst, " credits/mo you'd use ", overCr, " credits above the ", nearMiss.credits, "-credit cap — that's ~$", overCost, "/mo extra, pushing your total to ~$", nmTotal, "/mo. ",
+            React.createElement("strong", { style: { fontWeight: 700 } }, recommended.id),
+            " at $", recPrice, "/mo covers you fully",
+            saving > 0 ? React.createElement("span", null, " and saves ~$", saving, "/mo over sticking with ", nearMiss.id, " on overages") : null,
+            "."
+          )
+        );
+      })(),
+
       // ── High volume CTA
       React.createElement("div", {
         style: { marginTop: 56, background: "#F9F5FF", borderRadius: 24, padding: "36px 48px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 32, position: "relative", overflow: "hidden" }

@@ -10,10 +10,14 @@ p_start = bundle.index('function Pricing(')
 p_end   = bundle.index('function FAQ(')
 
 NEW_PRICING = r'''function Pricing({ onStarted }) {
-  const [annual,           setAnnual]           = React.useState(true);
-  const [rolesPerQtr,      setRolesPerQtr]      = React.useState(15);
-  const [candidatesPerRole,setCandidatesPerRole] = React.useState(5);
-  const [steps, setSteps] = React.useState({ screening: true, video: true, notetaker: false });
+  const [annual,       setAnnual]      = React.useState(true);
+  const [roles,        setRoles]       = React.useState(8);
+  const [aiScreens,    setAiScreens]   = React.useState(15);
+  const [videoInt,     setVideoInt]    = React.useState(6);
+  const [notetaker,    setNotetaker]   = React.useState(2);
+  const [useScreens,   setUseScreens]  = React.useState(true);
+  const [useVideo,     setUseVideo]    = React.useState(true);
+  const [useNote,      setUseNote]     = React.useState(false);
 
   const plans = [
     { id: "Pro 50",  monthly: 249,  credits: 50,  overage: "$10.00" },
@@ -22,46 +26,104 @@ NEW_PRICING = r'''function Pricing({ onStarted }) {
     { id: "Pro 300", monthly: 1199, credits: 300, overage: "$8.00"  }
   ];
 
-  const stepDefs = [
-    { key: "screening",  label: "AI Screening Call",  desc: "Text or phone screen"  },
-    { key: "video",      label: "Video Interview",    desc: "Async or live AI panel" },
-    { key: "notetaker",  label: "AI Notetaker",       desc: "Structured human interview" }
-  ];
+  // 1 credit = 1 AI interaction. Interactions per role = sum of active stage volumes.
+  const screensCredits   = useScreens ? aiScreens : 0;
+  const videoCredits     = useVideo   ? videoInt  : 0;
+  const notetakerCredits = useNote    ? notetaker : 0;
+  const interactionsPerRole = screensCredits + videoCredits + notetakerCredits;
+  const creditsEst = roles * interactionsPerRole;
 
-  const toggleStep = key => setSteps(s => ({ ...s, [key]: !s[key] }));
-
-  // ── Credit estimate
-  const activeSteps   = stepDefs.filter(s => steps[s.key]).length || 1;
-  const rolesPerMonth = rolesPerQtr / 3;
-  const creditsEst    = Math.ceil(rolesPerMonth * candidatesPerRole * activeSteps);
-
-  // First plan with enough credits; fall back to largest
   const recommended = plans.find(p => p.credits >= creditsEst) || plans[plans.length - 1];
   const isOverAll   = creditsEst > plans[plans.length - 1].credits;
 
   const fmt  = n => "$" + Math.round(n).toLocaleString();
   const fmt2 = n => "$" + n.toFixed(2);
 
-  // ── Slider component
-  const Slider = ({ label, value, min, max, step, onChange, format }) =>
-    React.createElement("div", { style: { flex: 1 } },
+  // ── Stepper — plain helper fn (not a component, avoids re-mount bugs)
+  const mkStepper = (value, setter, min, max) =>
+    React.createElement("div", { style: { display: "flex", alignItems: "center" } },
+      React.createElement("button", {
+        onClick: () => setter(Math.max(min, value - 1)),
+        style: { width: 30, height: 30, borderRadius: "8px 0 0 8px", border: "1px solid #DDD6FE", borderRight: 0, background: "#F5F3FF", cursor: "pointer", fontFamily: "inherit", fontSize: 18, lineHeight: 1, color: COLORS.accent, fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center" }
+      }, "−"),
       React.createElement("div", {
-        style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }
-      },
-        React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: "#3A3A44" } }, label),
-        React.createElement("span", { style: { fontSize: 18, fontWeight: 700, color: COLORS.textDark, letterSpacing: -0.5 } },
-          format ? format(value) : value
-        )
-      ),
+        style: { minWidth: 44, height: 30, border: "1px solid #DDD6FE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: COLORS.textDark, background: "#fff", letterSpacing: -0.3 }
+      }, value),
+      React.createElement("button", {
+        onClick: () => setter(Math.min(max, value + 1)),
+        style: { width: 30, height: 30, borderRadius: "0 8px 8px 0", border: "1px solid #DDD6FE", borderLeft: 0, background: "#F5F3FF", cursor: "pointer", fontFamily: "inherit", fontSize: 18, lineHeight: 1, color: COLORS.accent, fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center" }
+      }, "+")
+    );
+
+  // ── Toggle switch (CSS-only via inline style trick)
+  const mkToggle = (on, setOn, id) =>
+    React.createElement("label", {
+      htmlFor: id,
+      style: { position: "relative", display: "inline-block", width: 36, height: 20, cursor: "pointer", flexShrink: 0 }
+    },
       React.createElement("input", {
-        type: "range", min, max, step, value,
-        onChange: e => onChange(Number(e.target.value)),
-        style: { width: "100%", accentColor: COLORS.accent, cursor: "pointer" }
+        id, type: "checkbox", checked: on, onChange: () => setOn(!on),
+        style: { opacity: 0, width: 0, height: 0, position: "absolute" }
       }),
-      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 3 } },
-        React.createElement("span", { style: { fontSize: 10, color: COLORS.textDim } }, min),
-        React.createElement("span", { style: { fontSize: 10, color: COLORS.textDim } }, max)
-      )
+      React.createElement("span", {
+        style: {
+          position: "absolute", inset: 0,
+          background: on ? COLORS.accent : "#D1D5DB",
+          borderRadius: 999,
+          transition: "background 0.2s"
+        }
+      }),
+      React.createElement("span", {
+        style: {
+          position: "absolute",
+          top: 3, left: on ? 19 : 3,
+          width: 14, height: 14,
+          background: "#fff",
+          borderRadius: "50%",
+          transition: "left 0.2s",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
+        }
+      })
+    );
+
+  // ── Funnel stage row
+  const stageRow = (icon, label, sub, enabled, setEnabled, toggleId, value, setter, min, max, creditCount) =>
+    React.createElement("div", {
+      style: {
+        display: "flex", alignItems: "center", gap: 14,
+        padding: "14px 16px", borderRadius: 12,
+        background: enabled ? "#FDFAFF" : "#FAFAFA",
+        border: "1px solid " + (enabled ? "#E0D6FC" : "#EBEBEB"),
+        transition: "all 0.2s", opacity: enabled ? 1 : 0.55
+      }
+    },
+      // Icon
+      React.createElement("div", {
+        style: { width: 36, height: 36, borderRadius: 10, background: enabled ? COLORS.accentSoft : "#F0F0F0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0, transition: "background 0.2s" }
+      }, icon),
+      // Label + sub
+      React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: COLORS.textDark } }, label),
+        React.createElement("div", { style: { fontSize: 11, color: COLORS.textDim, marginTop: 1 } }, sub)
+      ),
+      // Stepper
+      React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+        mkStepper(value, setter, min, max),
+        React.createElement("span", { style: { fontSize: 11, color: COLORS.textDim, width: 72, textAlign: "left" } }, "per role")
+      ),
+      // Credit count badge
+      React.createElement("div", {
+        style: { minWidth: 80, textAlign: "right" }
+      },
+        enabled
+          ? React.createElement("div", null,
+              React.createElement("span", { style: { fontSize: 17, fontWeight: 700, color: COLORS.accent, letterSpacing: -0.5 } }, creditCount),
+              React.createElement("span", { style: { fontSize: 11, color: COLORS.textDim, marginLeft: 3 } }, "credits")
+            )
+          : React.createElement("span", { style: { fontSize: 12, color: "#CCC" } }, "—")
+      ),
+      // Toggle
+      mkToggle(enabled, setEnabled, toggleId)
     );
 
   return React.createElement("section", {
@@ -70,98 +132,146 @@ NEW_PRICING = r'''function Pricing({ onStarted }) {
   },
     React.createElement("div", { style: { maxWidth: 1240, margin: "0 auto" } },
 
-      // ── Header (centred)
-      React.createElement("div", { style: { textAlign: "center", marginBottom: 48 } },
+      // ── Section header
+      React.createElement("div", { style: { textAlign: "center", marginBottom: 52 } },
         React.createElement("div", { style: { fontSize: 11, color: COLORS.accent, letterSpacing: 2, fontWeight: 600 } }, "TRANSPARENT PRICING"),
         React.createElement("h2", {
           style: { fontSize: 52, lineHeight: 1.05, letterSpacing: -1.4, fontWeight: 700, margin: "16px auto 12px", color: COLORS.textDark, maxWidth: 820 }
         }, "Pay for outcomes, ", React.createElement("span", { style: { color: COLORS.accent } }, "not overhead.")),
-        React.createElement("p", { style: { fontSize: 16, color: "#3A3A44", margin: 0 } },
-          "Credits reset monthly. Use them across any AI touchpoint.")
+        React.createElement("p", { style: { fontSize: 16, color: "#3A3A44", margin: "0 auto", maxWidth: 520 } },
+          "Every credit is one AI interaction — a screening call, text exchange, video interview, or notetaker session.")
       ),
 
-      // ── Calculator panel
+      // ── Calculator card
       React.createElement("div", {
-        style: { background: "#F9F5FF", border: "1px solid #E0D6FC", borderRadius: 20, padding: "32px 36px", marginBottom: 36 }
+        style: { display: "grid", gridTemplateColumns: "1fr 300px", gap: 0, background: "#fff", border: "1px solid #E8E3F6", borderRadius: 20, overflow: "hidden", marginBottom: 36, boxShadow: "0 2px 16px rgba(100,60,200,0.06)" }
       },
-        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 24 } },
-          React.createElement("div", {
-            style: { width: 28, height: 28, borderRadius: 8, background: COLORS.accent, display: "flex", alignItems: "center", justifyContent: "center" }
-          },
-            React.createElement("svg", { width: 14, height: 14, viewBox: "0 0 14 14", fill: "none" },
-              React.createElement("rect", { x: 1, y: 1, width: 4, height: 4, rx: 1, fill: "#fff" }),
-              React.createElement("rect", { x: 1, y: 7, width: 4, height: 4, rx: 1, fill: "#fff" }),
-              React.createElement("rect", { x: 7, y: 1, width: 4, height: 4, rx: 1, fill: "#fff" }),
-              React.createElement("rect", { x: 7, y: 7, width: 4, height: 4, rx: 1, fill: "#fff" })
-            )
-          ),
-          React.createElement("div", null,
-            React.createElement("div", { style: { fontSize: 14, fontWeight: 700, color: COLORS.textDark } }, "Credit estimator"),
-            React.createElement("div", { style: { fontSize: 12, color: COLORS.textDim } }, "Dial in your hiring context — we'll show the right plan")
-          )
-        ),
 
-        // Sliders row
-        React.createElement("div", { style: { display: "flex", gap: 32, marginBottom: 24 } },
-          React.createElement(Slider, {
-            label: "Roles per quarter", value: rolesPerQtr,
-            min: 1, max: 100, step: 1,
-            onChange: setRolesPerQtr
-          }),
-          React.createElement(Slider, {
-            label: "Candidates per role", value: candidatesPerRole,
-            min: 1, max: 20, step: 1,
-            onChange: setCandidatesPerRole,
-            format: n => n + " candidates"
-          })
-        ),
-
-        // Steps row + result
-        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" } },
-          // Step checkboxes
-          React.createElement("div", { style: { flex: 1 } },
-            React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: "#3A3A44", marginBottom: 10 } }, "AI steps per candidate"),
-            React.createElement("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
-              stepDefs.map(s =>
-                React.createElement("label", {
-                  key: s.key,
-                  style: { display: "flex", alignItems: "center", gap: 7, cursor: "pointer", background: steps[s.key] ? COLORS.accentSoft : "#fff", border: "1px solid " + (steps[s.key] ? COLORS.accent : COLORS.borderLight), borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 600, color: steps[s.key] ? COLORS.accent : "#6A6A74", userSelect: "none", transition: "all 0.15s" }
-                },
-                  React.createElement("input", {
-                    type: "checkbox", checked: steps[s.key],
-                    onChange: () => toggleStep(s.key),
-                    style: { accentColor: COLORS.accent, width: 13, height: 13 }
-                  }),
-                  React.createElement("span", null, s.label),
-                  React.createElement("span", { style: { fontWeight: 400, opacity: 0.65 } }, "· " + s.desc)
-                )
-              )
-            )
-          ),
-
-          // Result box
-          React.createElement("div", {
-            style: { background: "#fff", border: "2px solid " + (isOverAll ? "#E11D48" : COLORS.accent), borderRadius: 14, padding: "16px 24px", minWidth: 220, textAlign: "center", flexShrink: 0 }
-          },
-            React.createElement("div", { style: { fontSize: 11, color: isOverAll ? "#E11D48" : COLORS.accent, fontWeight: 700, letterSpacing: 1.5, marginBottom: 6 } },
-              isOverAll ? "CUSTOM VOLUME" : "YOUR ESTIMATE"
-            ),
-            React.createElement("div", { style: { fontSize: 40, fontWeight: 700, letterSpacing: -1.5, color: COLORS.textDark, lineHeight: 1 } },
-              creditsEst
-            ),
-            React.createElement("div", { style: { fontSize: 12, color: COLORS.textDim, marginTop: 4 } }, "credits / month"),
+        // Left: inputs
+        React.createElement("div", { style: { padding: "32px 36px", borderRight: "1px solid #F0ECFB" } },
+          React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, marginBottom: 28 } },
             React.createElement("div", {
-              style: { marginTop: 10, fontSize: 11, color: "#5A5A64", background: "#F4F1FA", borderRadius: 6, padding: "4px 8px", lineHeight: 1.4 }
+              style: { width: 36, height: 36, borderRadius: 10, background: COLORS.accentSoft, display: "flex", alignItems: "center", justifyContent: "center" }
             },
-              Math.round(rolesPerMonth * 10) / 10, " roles/mo × ", candidatesPerRole, " candidates × ", activeSteps, " step", activeSteps !== 1 ? "s" : ""
+              React.createElement("svg", { width: 18, height: 18, viewBox: "0 0 18 18", fill: "none" },
+                React.createElement("path", { d: "M3 9h12M9 3v12", stroke: COLORS.accent, strokeWidth: 2, strokeLinecap: "round" }),
+                React.createElement("circle", { cx: 9, cy: 9, r: 8, stroke: COLORS.accent, strokeWidth: 1.5 })
+              )
             ),
-            !isOverAll && React.createElement("div", { style: { marginTop: 8, fontSize: 12, fontWeight: 700, color: COLORS.accent } },
-              "→ ", recommended.id, " recommended"
-            ),
-            isOverAll && React.createElement("div", { style: { marginTop: 8, fontSize: 12, fontWeight: 700, color: "#E11D48" } },
-              "→ Talk to sales"
+            React.createElement("div", null,
+              React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: COLORS.textDark } }, "Build your estimate"),
+              React.createElement("div", { style: { fontSize: 12, color: COLORS.textDim } }, "Turn on the AI steps your process uses, adjust volumes per role")
             )
+          ),
+
+          // Roles per month row
+          React.createElement("div", {
+            style: { display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderRadius: 12, background: "#1F1140", marginBottom: 12 }
+          },
+            React.createElement("div", { style: { width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 } }, "📋"),
+            React.createElement("div", { style: { flex: 1 } },
+              React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#fff" } }, "Roles filled per month"),
+              React.createElement("div", { style: { fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 1 } }, "How many positions do you hire for each month?")
+            ),
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+              React.createElement("button", {
+                onClick: () => setRoles(Math.max(1, roles - 1)),
+                style: { width: 30, height: 30, borderRadius: "8px 0 0 8px", border: "1px solid rgba(255,255,255,0.2)", borderRight: 0, background: "rgba(255,255,255,0.08)", cursor: "pointer", fontFamily: "inherit", fontSize: 18, color: "#fff", fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center" }
+              }, "−"),
+              React.createElement("div", {
+                style: { minWidth: 44, height: 30, border: "1px solid rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", background: "rgba(255,255,255,0.05)" }
+              }, roles),
+              React.createElement("button", {
+                onClick: () => setRoles(Math.min(100, roles + 1)),
+                style: { width: 30, height: 30, borderRadius: "0 8px 8px 0", border: "1px solid rgba(255,255,255,0.2)", borderLeft: 0, background: "rgba(255,255,255,0.08)", cursor: "pointer", fontFamily: "inherit", fontSize: 18, color: "#fff", fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center" }
+              }, "+")
+            ),
+            React.createElement("div", { style: { minWidth: 80, textAlign: "right" } },
+              React.createElement("span", { style: { fontSize: 17, fontWeight: 700, color: "#94E022", letterSpacing: -0.5 } }, roles),
+              React.createElement("span", { style: { fontSize: 11, color: "rgba(255,255,255,0.45)", marginLeft: 3 } }, "roles/mo")
+            )
+          ),
+
+          // Connector dot
+          React.createElement("div", { style: { display: "flex", alignItems: "center", paddingLeft: 34, gap: 6, marginBottom: 6 } },
+            React.createElement("div", { style: { width: 1, height: 12, background: "#DDD6FE" } }),
+            React.createElement("span", { style: { fontSize: 10, color: COLORS.textDim, letterSpacing: 1, fontWeight: 600 } }, "EACH ROLE GOES THROUGH")
+          ),
+
+          // Stage rows
+          React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+            stageRow("📞", "AI Screening", "Text messages or phone calls — each counts as 1 credit", useScreens, setUseScreens, "tog-s", aiScreens, setAiScreens, 1, 50, roles * aiScreens),
+            stageRow("🎥", "Video Interview", "Async or live AI-led video screen — 1 credit per candidate", useVideo, setUseVideo, "tog-v", videoInt, setVideoInt, 1, 30, roles * videoInt),
+            stageRow("📝", "AI Notetaker", "Structured interview with a human — AI records and scores", useNote, setUseNote, "tog-n", notetaker, setNotetaker, 1, 15, roles * notetaker)
           )
+        ),
+
+        // Right: live estimate panel
+        React.createElement("div", {
+          style: { padding: "32px 28px", background: isOverAll ? "#FFF1F2" : creditsEst === 0 ? "#FAFAFA" : "#F9F5FF", display: "flex", flexDirection: "column", justifyContent: "space-between" }
+        },
+          React.createElement("div", null,
+            React.createElement("div", { style: { fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: isOverAll ? "#E11D48" : COLORS.accent, marginBottom: 16 } },
+              isOverAll ? "HIGH VOLUME" : "YOUR ESTIMATE"
+            ),
+
+            // Big credits number
+            React.createElement("div", { style: { marginBottom: 20 } },
+              React.createElement("div", {
+                style: { fontSize: creditsEst >= 1000 ? 52 : 64, fontWeight: 700, letterSpacing: -2, color: COLORS.textDark, lineHeight: 1 }
+              }, creditsEst === 0 ? "—" : creditsEst),
+              React.createElement("div", { style: { fontSize: 13, color: COLORS.textDim, marginTop: 6 } },
+                creditsEst === 0 ? "Enable at least one stage" : "credits / month"
+              )
+            ),
+
+            // Breakdown
+            creditsEst > 0 && React.createElement("div", {
+              style: { background: "rgba(124,77,255,0.06)", borderRadius: 10, padding: "12px 14px", marginBottom: 20 }
+            },
+              React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: COLORS.textDim, letterSpacing: 0.5, marginBottom: 8 } }, "BREAKDOWN"),
+              useScreens && React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: COLORS.textDark, marginBottom: 4 } },
+                React.createElement("span", null, roles, " roles × ", aiScreens, " screens"),
+                React.createElement("span", { style: { fontWeight: 700 } }, roles * aiScreens, " cr")
+              ),
+              useVideo && React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: COLORS.textDark, marginBottom: 4 } },
+                React.createElement("span", null, roles, " roles × ", videoInt, " videos"),
+                React.createElement("span", { style: { fontWeight: 700 } }, roles * videoInt, " cr")
+              ),
+              useNote && React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: COLORS.textDark, marginBottom: 4 } },
+                React.createElement("span", null, roles, " roles × ", notetaker, " notes"),
+                React.createElement("span", { style: { fontWeight: 700 } }, roles * notetaker, " cr")
+              ),
+              React.createElement("div", { style: { borderTop: "1px solid rgba(124,77,255,0.12)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, color: COLORS.textDark } },
+                React.createElement("span", null, "Total"),
+                React.createElement("span", { style: { color: COLORS.accent } }, creditsEst, " cr/mo")
+              )
+            ),
+
+            // Recommended plan
+            creditsEst > 0 && !isOverAll && React.createElement("div", {
+              style: { background: COLORS.accent, borderRadius: 12, padding: "14px 16px" }
+            },
+              React.createElement("div", { style: { fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: "rgba(255,255,255,0.65)", marginBottom: 4 } }, "RECOMMENDED"),
+              React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: "#fff", letterSpacing: -0.5 } }, recommended.id),
+              React.createElement("div", { style: { fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 } },
+                recommended.credits, " credits/mo · ", recommended.credits - creditsEst, " headroom"
+              )
+            ),
+
+            isOverAll && React.createElement("div", {
+              style: { background: "#E11D48", borderRadius: 12, padding: "14px 16px" }
+            },
+              React.createElement("div", { style: { fontSize: 10, fontWeight: 700, letterSpacing: 1.5, color: "rgba(255,255,255,0.65)", marginBottom: 4 } }, "VOLUME TOO HIGH"),
+              React.createElement("div", { style: { fontSize: 16, fontWeight: 700, color: "#fff" } }, "Custom plan needed"),
+              React.createElement("div", { style: { fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 2 } }, "Let's build something for you")
+            )
+          ),
+
+          React.createElement("button", {
+            onClick: () => onStarted(null),
+            style: { marginTop: 24, width: "100%", background: isOverAll ? "#E11D48" : COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "13px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }
+          }, isOverAll ? "Speak to sales →" : "Get started →")
         )
       ),
 
@@ -189,40 +299,31 @@ NEW_PRICING = r'''function Pricing({ onStarted }) {
         style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, textAlign: "left" }
       },
         plans.map(p => {
-          const isBestFit      = !isOverAll && p.id === recommended.id;
-          const monthlyEff     = annual ? p.monthly * 0.8 : p.monthly;
-          const perCredit      = monthlyEff / p.credits;
-          const coverageRatio  = Math.min(p.credits / creditsEst, 1);
-          const barColor       = isBestFit ? COLORS.accent : (p.credits < creditsEst ? "#E11D48" : COLORS.borderLight);
+          const isBest     = !isOverAll && creditsEst > 0 && p.id === recommended.id;
+          const monthlyEff = annual ? p.monthly * 0.8 : p.monthly;
+          const perCredit  = monthlyEff / p.credits;
 
           return React.createElement("div", {
             key: p.id,
             style: {
-              background: isBestFit ? "#FDFAFF" : "#fff",
-              border: (isBestFit ? 2 : 1) + "px solid " + (isBestFit ? COLORS.accent : COLORS.borderLight),
+              background: isBest ? "#FDFAFF" : "#fff",
+              border: (isBest ? "2px" : "1px") + " solid " + (isBest ? COLORS.accent : COLORS.borderLight),
               borderRadius: 16, padding: 24, position: "relative",
               display: "flex", flexDirection: "column",
-              transition: "border-color 0.25s, box-shadow 0.25s",
-              boxShadow: isBestFit ? "0 0 0 4px rgba(124,77,255,0.10)" : "none"
+              boxShadow: isBest ? "0 0 0 4px rgba(124,77,255,0.08)" : "none",
+              transition: "box-shadow 0.25s, border-color 0.25s"
             }
           },
-            // Best fit badge (replaces popular badge when calculator is used)
-            isBestFit && React.createElement("div", {
+            isBest && React.createElement("div", {
               style: { position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", background: COLORS.accent, color: "#fff", fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 12, letterSpacing: 0.4, whiteSpace: "nowrap" }
-            }, "BEST FIT FOR YOU"),
+            }, creditsEst > 0 ? "BEST FIT FOR YOU" : "MOST POPULAR"),
 
-            !isBestFit && p.popular && !isOverAll && React.createElement("div", {
-              style: { position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", background: "#E4E4E7", color: "#6A6A74", fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 12, letterSpacing: 0.4, whiteSpace: "nowrap" }
+            !isBest && p.popular && React.createElement("div", {
+              style: { position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", background: creditsEst > 0 ? "#E4E4E7" : COLORS.accent, color: creditsEst > 0 ? "#6A6A74" : "#fff", fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 12, letterSpacing: 0.4, whiteSpace: "nowrap" }
             }, "MOST POPULAR"),
 
-            !isBestFit && p.popular && isOverAll && React.createElement("div", {
-              style: { position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", background: COLORS.accent, color: "#fff", fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 12, letterSpacing: 0.4, whiteSpace: "nowrap" }
-            }, "MOST POPULAR"),
-
-            // Plan name
             React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: COLORS.textDark, letterSpacing: 0.2 } }, p.id),
 
-            // Price
             React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 4, marginTop: 10 } },
               React.createElement("span", { style: { fontSize: 38, fontWeight: 700, letterSpacing: -1.4, color: COLORS.textDark } }, fmt(monthlyEff)),
               React.createElement("span", { style: { fontSize: 13, color: COLORS.textDim } }, "/mo"),
@@ -230,14 +331,12 @@ NEW_PRICING = r'''function Pricing({ onStarted }) {
             ),
             React.createElement("div", { style: { fontSize: 12, color: COLORS.textDim, marginTop: 4 } },
               annual
-                ? React.createElement(React.Fragment, null, "Billed monthly · ", fmt(monthlyEff * 12), "/yr")
+                ? React.createElement(React.Fragment, null, "Billed monthly \xB7 ", fmt(monthlyEff * 12), "/yr")
                 : "Billed monthly"
             ),
 
-            // Divider
             React.createElement("div", { style: { borderTop: "1px solid " + COLORS.borderLight, margin: "18px 0 14px" } }),
 
-            // Credits + per credit
             React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 } },
               React.createElement("div", null,
                 React.createElement("div", { style: { fontSize: 10, color: COLORS.textDim, letterSpacing: 1, fontWeight: 600 } }, "CREDITS"),
@@ -252,43 +351,22 @@ NEW_PRICING = r'''function Pricing({ onStarted }) {
               )
             ),
 
-            // Coverage bar — shows how well this plan covers the user's estimate
-            creditsEst > 0 && React.createElement("div", { style: { marginBottom: 14 } },
-              React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 } },
-                React.createElement("span", { style: { fontSize: 10, color: COLORS.textDim, fontWeight: 600, letterSpacing: 1 } }, "COVERS YOUR ESTIMATE"),
-                React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: p.credits < creditsEst ? "#E11D48" : COLORS.accent } },
-                  p.credits < creditsEst
-                    ? p.credits + "/" + creditsEst + " — needs overage"
-                    : p.credits >= creditsEst ? "✓ fits" : ""
-                )
-              ),
-              React.createElement("div", { style: { height: 4, background: "#F0EDFB", borderRadius: 99 } },
-                React.createElement("div", {
-                  style: { height: 4, borderRadius: 99, background: barColor, width: (Math.min(coverageRatio, 1) * 100) + "%", transition: "width 0.3s, background 0.3s" }
-                })
-              )
-            ),
-
-            // Overage
             React.createElement("div", {
               title: "Extra interactions at " + p.overage + "/credit — no hard cap.",
               style: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: COLORS.textDim, cursor: "help", borderBottom: "1px dashed " + COLORS.borderLight, paddingBottom: 1, alignSelf: "flex-start", marginBottom: 18 }
             },
-              "Overage ",
-              React.createElement("span", { style: { color: COLORS.textDark, fontWeight: 600 } }, p.overage),
-              "/credit"
+              "Overage ", React.createElement("span", { style: { color: COLORS.textDark, fontWeight: 600 } }, p.overage), "/credit"
             ),
 
-            // CTA
             React.createElement("button", {
               onClick: () => onStarted(null),
-              style: { marginTop: "auto", width: "100%", background: isBestFit ? COLORS.accent : "transparent", color: isBestFit ? "#fff" : COLORS.accent, border: "1px solid " + COLORS.accent, borderRadius: 10, padding: "12px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }
-            }, isBestFit ? "Get started — " + p.id : "Get started")
+              style: { marginTop: "auto", width: "100%", background: isBest ? COLORS.accent : "transparent", color: isBest ? "#fff" : COLORS.accent, border: "1px solid " + COLORS.accent, borderRadius: 10, padding: "12px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }
+            }, "Get started")
           );
         })
       ),
 
-      // ── High Volume CTA
+      // ── High volume CTA
       React.createElement("div", {
         style: { marginTop: 56, background: "#F9F5FF", borderRadius: 24, padding: "36px 48px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 32, position: "relative", overflow: "hidden" }
       },
@@ -316,7 +394,6 @@ NEW_PRICING = r'''function Pricing({ onStarted }) {
 
 new_bundle = bundle[:p_start] + NEW_PRICING + bundle[p_end:]
 new_b64 = base64.b64encode(gzip.compress(new_bundle.encode('utf-8'), compresslevel=6)).decode('ascii')
-
 new_html = re.sub(
     r'(<script[^>]*id="wp-rl-app-data"[^>]*>)(.*?)(</script>)',
     lambda m: m.group(1) + new_b64 + m.group(3),
@@ -326,5 +403,4 @@ new_html = re.sub(
 out = 'variant-2-calculator.html'
 with open(out, 'w') as f:
     f.write(new_html)
-
 print(f"Written: {out}  ({len(new_html):,} bytes)")
